@@ -1,0 +1,209 @@
+import React, { useState, useRef, useEffect } from 'react';
+
+// Inline styles
+const styles = {
+  container: {
+    width: '100%',
+    maxWidth: '1000px',
+    margin: '0 auto',
+    padding: '16px',
+  },
+  videoContainer: {
+    position: 'relative',
+    width: '100%',
+    paddingBottom: '56.25%', // 16:9 aspect ratio
+    backgroundColor: '#000',
+    borderRadius: '8px',
+    overflow: 'hidden',
+    marginBottom: '16px',
+  },
+  mjpegImage: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    width: '100%',
+    height: '100%',
+    objectFit: 'cover',
+    display: 'block',
+  },
+  loadingOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    width: '100%',
+    height: '100%',
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+    color: '#fff',
+    zIndex: 10,
+  },
+  errorOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    width: '100%',
+    height: '100%',
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+    color: '#ff6b6b',
+    zIndex: 20,
+    textAlign: 'center',
+    padding: '20px',
+  },
+  title: {
+    fontSize: '20px',
+    marginBottom: '16px',
+    color: '#333',
+  },
+  status: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    padding: '4px 12px',
+    borderRadius: '16px',
+    backgroundColor: 'rgba(0, 0, 0, 0.05)',
+    fontSize: '14px',
+  },
+  statusDot: {
+    width: '8px',
+    height: '8px',
+    borderRadius: '50%',
+    marginRight: '8px',
+  },
+};
+
+const Camera = ({ onFaceDetected, mode = 'face' }) => {
+  const [isStreaming, setIsStreaming] = useState(false);
+  const [error, setError] = useState(null);
+  const [timestamp, setTimestamp] = useState(Date.now());
+  const imgRef = useRef(null);
+  const retryTimeoutRef = useRef(null);
+  const retryCountRef = useRef(0);
+  const MAX_RETRIES = 5;
+
+  // Base URL for the API - using relative URL for same-origin requests
+  const API_BASE_URL = '';
+  const videoFeedUrl = `${API_BASE_URL}/api/video_feed/face?t=${timestamp}&mode=${mode}`;
+
+  // Handle successful image load
+  const handleImageLoaded = () => {
+    console.log('[Camera] Image loaded successfully');
+    setIsStreaming(true);
+    setError(null);
+    retryCountRef.current = 0; // Reset retry counter on success
+  };
+
+  // Handle image loading errors
+  const handleImageError = (e) => {
+    console.error('[Camera] Error loading image:', e);
+    setIsStreaming(false);
+    
+    if (retryCountRef.current < MAX_RETRIES) {
+      const delay = Math.min(1000 * Math.pow(2, retryCountRef.current), 10000); // Exponential backoff
+      console.log(`[Camera] Retrying in ${delay}ms (attempt ${retryCountRef.current + 1}/${MAX_RETRIES})`);
+      
+      retryTimeoutRef.current = setTimeout(() => {
+        setTimestamp(Date.now()); // Force refresh
+        retryCountRef.current++;
+      }, delay);
+    } else {
+      setError('Failed to load video feed. Please check your connection and try again.');
+    }
+  };
+
+  // Clean up on unmount
+  useEffect(() => {
+    return () => {
+      if (retryTimeoutRef.current) {
+        clearTimeout(retryTimeoutRef.current);
+      }
+    };
+  }, []);
+
+  // Get status text based on current state
+  const getStatusText = () => {
+    if (error) return 'Error';
+    if (!isStreaming) return 'Connecting...';
+    return `Live (${mode})`;
+  };
+
+  // Get status color based on current state
+  const getStatusColor = () => {
+    if (error) return '#f44336';
+    if (!isStreaming) return '#ff9800';
+    return '#4caf50';
+  };
+
+  return (
+    <div style={styles.container}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+        <h2 style={styles.title}>Camera Feed</h2>
+        <div style={styles.status}>
+          <div style={{ ...styles.statusDot, backgroundColor: getStatusColor() }} />
+          <span>{getStatusText()}</span>
+        </div>
+      </div>
+      
+      <div style={styles.videoContainer}>
+        <img
+          ref={imgRef}
+          src={videoFeedUrl}
+          alt="Camera Feed"
+          style={styles.mjpegImage}
+          onLoad={handleImageLoaded}
+          onError={handleImageError}
+        />
+        
+        {!isStreaming && !error && (
+          <div style={styles.loadingOverlay}>
+            <div className="spinner" style={{
+              width: '40px',
+              height: '40px',
+              border: '4px solid rgba(255, 255, 255, 0.3)',
+              borderRadius: '50%',
+              borderTopColor: '#fff',
+              animation: 'spin 1s ease-in-out infinite',
+            }} />
+            <p style={{ marginTop: '16px' }}>Connecting to camera...</p>
+          </div>
+        )}
+        
+        {error && (
+          <div style={styles.errorOverlay}>
+            <p style={{ marginBottom: '16px' }}>{error}</p>
+            <button 
+              onClick={() => {
+                setError(null);
+                setTimestamp(Date.now());
+                retryCountRef.current = 0;
+              }}
+              style={{
+                backgroundColor: '#4caf50',
+                color: 'white',
+                border: 'none',
+                padding: '8px 16px',
+                borderRadius: '4px',
+                cursor: 'pointer',
+              }}
+            >
+              Retry
+            </button>
+          </div>
+        )}
+      </div>
+      
+      <style jsx global>{`
+        @keyframes spin {
+          to { transform: rotate(360deg); }
+        }
+      `}</style>
+    </div>
+  );
+};
+
+export default Camera;
